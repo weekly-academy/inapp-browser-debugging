@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slack InApp Browser Debug</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 16px;
+      background: #1a1d21;
+      color: #e8e8e8;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 18px; color: #fff; margin-bottom: 16px; }
+    h2 { font-size: 14px; color: #36c5f0; margin: 16px 0 8px; }
+    .section {
+      background: #222529;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+    }
+    .label { color: #9e9e9e; font-size: 12px; }
+    .value { color: #fff; word-break: break-all; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-size: 12px;
+      color: #e8e8e8;
+    }
+    .highlight { color: #2eb67d; }
+    .warn { color: #ecb22e; }
+    button {
+      background: #36c5f0;
+      color: #000;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin: 4px;
+      cursor: pointer;
+    }
+    button:active { opacity: 0.8; }
+    #customProps { max-height: 400px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Slack InApp Browser Debug</h1>
+
+  <h2>User Agent</h2>
+  <div class="section">
+    <pre id="userAgent"></pre>
+  </div>
+
+  <h2>기본 환경</h2>
+  <div class="section">
+    <div><span class="label">Platform:</span> <span class="value" id="platform"></span></div>
+    <div><span class="label">Screen:</span> <span class="value" id="screen"></span></div>
+    <div><span class="label">Viewport:</span> <span class="value" id="viewport"></span></div>
+    <div><span class="label">DevicePixelRatio:</span> <span class="value" id="dpr"></span></div>
+    <div><span class="label">Touch:</span> <span class="value" id="touch"></span></div>
+    <div><span class="label">Online:</span> <span class="value" id="online"></span></div>
+  </div>
+
+  <h2>Slack / 앱 관련 객체</h2>
+  <div class="section">
+    <pre id="slackObjects"></pre>
+  </div>
+
+  <h2>Window 커스텀 속성</h2>
+  <div class="section">
+    <p class="label">기본 브라우저에 없는 window 속성들:</p>
+    <pre id="customProps"></pre>
+  </div>
+
+  <h2>WebView 브릿지 체크</h2>
+  <div class="section">
+    <pre id="bridges"></pre>
+  </div>
+
+  <h2>커스텀 코드 실행</h2>
+  <div class="section">
+    <textarea id="customCode" rows="4" style="width:100%; background:#1a1d21; color:#fff; border:1px solid #444; border-radius:4px; padding:8px; font-family:monospace; font-size:12px;">JSON.stringify(window.navigator, null, 2)</textarea>
+    <br>
+    <button onclick="runCustomCode()">실행</button>
+    <button onclick="copyResults()">결과 복사</button>
+    <pre id="customResult" style="margin-top:8px; color:#2eb67d;"></pre>
+  </div>
+
+  <script>
+    // User Agent
+    document.getElementById('userAgent').textContent = navigator.userAgent;
+
+    // 기본 환경
+    document.getElementById('platform').textContent = navigator.platform;
+    document.getElementById('screen').textContent = `${screen.width} x ${screen.height}`;
+    document.getElementById('viewport').textContent = `${window.innerWidth} x ${window.innerHeight}`;
+    document.getElementById('dpr').textContent = window.devicePixelRatio;
+    document.getElementById('touch').textContent = 'ontouchstart' in window ? 'Yes' : 'No';
+    document.getElementById('online').textContent = navigator.onLine ? 'Yes' : 'No';
+
+    // Slack 관련 객체 체크
+    const slackChecks = [
+      'slack', 'Slack', 'SLACK',
+      'slackDebug', 'SlackWebView',
+      'TSSSB', 'TS', 
+      'desktop', 'electronAPI',
+      'webkit.messageHandlers',
+      'ReactNativeWebView',
+      'slackMobile', 'SlackMobile'
+    ];
+
+    let slackResult = '';
+    slackChecks.forEach(key => {
+      let value;
+      try {
+        value = eval('window.' + key);
+        const exists = value !== undefined;
+        slackResult += `${exists ? '✅' : '❌'} ${key}: ${exists ? typeof value : 'undefined'}\n`;
+        if (exists && typeof value === 'object') {
+          try {
+            const keys = Object.keys(value).slice(0, 10);
+            if (keys.length > 0) {
+              slackResult += `   └─ keys: ${keys.join(', ')}${Object.keys(value).length > 10 ? '...' : ''}\n`;
+            }
+          } catch(e) {}
+        }
+      } catch(e) {
+        slackResult += `❌ ${key}: error\n`;
+      }
+    });
+    document.getElementById('slackObjects').textContent = slackResult;
+
+    // 기본 window 속성 목록 (비교용)
+    const defaultWindowProps = new Set([
+      'Object', 'Function', 'Array', 'Number', 'parseFloat', 'parseInt', 'Infinity', 'NaN', 'undefined',
+      'Boolean', 'String', 'Symbol', 'Date', 'Promise', 'RegExp', 'Error', 'AggregateError', 'EvalError',
+      'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError', 'URIError', 'globalThis', 'JSON', 'Math',
+      'Intl', 'ArrayBuffer', 'Uint8Array', 'Int8Array', 'Uint16Array', 'Int16Array', 'Uint32Array',
+      'Int32Array', 'Float32Array', 'Float64Array', 'Uint8ClampedArray', 'BigUint64Array', 'BigInt64Array',
+      'DataView', 'Map', 'BigInt', 'Set', 'WeakMap', 'WeakSet', 'Proxy', 'Reflect', 'FinalizationRegistry',
+      'WeakRef', 'decodeURI', 'decodeURIComponent', 'encodeURI', 'encodeURIComponent', 'escape', 'unescape',
+      'eval', 'isFinite', 'isNaN', 'console', 'Option', 'Image', 'Audio', 'webkitURL', 'webkitRTCPeerConnection',
+      'webkitMediaStream', 'WebKitMutationObserver', 'WebKitCSSMatrix', 'XPathResult', 'XPathExpression',
+      'XPathEvaluator', 'XMLSerializer', 'XMLHttpRequestUpload', 'XMLHttpRequestEventTarget', 'XMLHttpRequest',
+      'XMLDocument', 'WritableStreamDefaultWriter', 'WritableStreamDefaultController', 'WritableStream',
+      'Worker', 'Window', 'WheelEvent', 'WebSocket', 'WebGLVertexArrayObject', 'WebGLUniformLocation',
+      'WebGLTransformFeedback', 'WebGLTexture', 'WebGLSync', 'WebGLShaderPrecisionFormat', 'WebGLShader',
+      'WebGLSampler', 'WebGLRenderingContext', 'WebGL2RenderingContext', 'WebGLQuery', 'WebGLProgram',
+      'WebGLFramebuffer', 'WebGLContextEvent', 'WebGLBuffer', 'WebGLActiveInfo', 'WaveShaperNode',
+      'VisualViewport', 'ValidityState', 'VTTCue', 'UserActivation', 'URLSearchParams', 'URL', 'UIEvent',
+      'TreeWalker', 'TransitionEvent', 'TransformStream', 'TrackEvent', 'TouchList', 'TouchEvent', 'Touch',
+      'TimeRanges', 'TextTrackList', 'TextTrackCueList', 'TextTrackCue', 'TextTrack', 'TextMetrics',
+      'TextEvent', 'TextEncoderStream', 'TextEncoder', 'TextDecoderStream', 'TextDecoder', 'Text',
+      'TaskAttributionTiming', 'SyncManager', 'SubmitEvent', 'StyleSheetList', 'StyleSheet',
+      'StylePropertyMapReadOnly', 'StylePropertyMap', 'StorageEvent', 'Storage', 'StereoPannerNode',
+      'StaticRange', 'SourceBufferList', 'SourceBuffer', 'ShadowRoot', 'Selection', 'SecurityPolicyViolationEvent',
+      'ScriptProcessorNode', 'ScreenOrientation', 'Screen', 'SVGViewElement', 'SVGUseElement', 'SVGUnitTypes',
+      'document', 'location', 'navigator', 'history', 'screen', 'innerWidth', 'innerHeight', 'scrollX',
+      'scrollY', 'pageXOffset', 'pageYOffset', 'visualViewport', 'screenX', 'screenY', 'outerWidth',
+      'outerHeight', 'devicePixelRatio', 'clientInformation', 'screenLeft', 'screenTop', 'defaultStatus',
+      'defaultstatus', 'styleMedia', 'onsearch', 'isSecureContext', 'performance', 'onappinstalled',
+      'onbeforeinstallprompt', 'crypto', 'indexedDB', 'sessionStorage', 'localStorage', 'onbeforexrselect',
+      'onabort', 'onblur', 'oncancel', 'oncanplay', 'oncanplaythrough', 'onchange', 'onclick', 'onclose',
+      'oncontextmenu', 'oncuechange', 'ondblclick', 'ondrag', 'ondragend', 'ondragenter', 'ondragleave',
+      'ondragover', 'ondragstart', 'ondrop', 'ondurationchange', 'onemptied', 'onended', 'onerror', 'onfocus',
+      'onformdata', 'oninput', 'oninvalid', 'onkeydown', 'onkeypress', 'onkeyup', 'onload', 'onloadeddata',
+      'onloadedmetadata', 'onloadstart', 'onmousedown', 'onmouseenter', 'onmouseleave', 'onmousemove',
+      'onmouseout', 'onmouseover', 'onmouseup', 'onmousewheel', 'onpause', 'onplay', 'onplaying',
+      'onprogress', 'onratechange', 'onreset', 'onresize', 'onscroll', 'onseeked', 'onseeking', 'onselect',
+      'onstalled', 'onsubmit', 'onsuspend', 'ontimeupdate', 'ontoggle', 'onvolumechange', 'onwaiting',
+      'onwebkitanimationend', 'onwebkitanimationiteration', 'onwebkitanimationstart', 'onwebkittransitionend',
+      'onwheel', 'onauxclick', 'ongotpointercapture', 'onlostpointercapture', 'onpointerdown', 'onpointermove',
+      'onpointerup', 'onpointercancel', 'onpointerover', 'onpointerout', 'onpointerenter', 'onpointerleave',
+      'onselectstart', 'onselectionchange', 'onanimationend', 'onanimationiteration', 'onanimationstart',
+      'ontransitionrun', 'ontransitionstart', 'ontransitionend', 'ontransitioncancel', 'onafterprint',
+      'onbeforeprint', 'onbeforeunload', 'onhashchange', 'onlanguagechange', 'onmessage', 'onmessageerror',
+      'onoffline', 'ononline', 'onpagehide', 'onpageshow', 'onpopstate', 'onrejectionhandled', 'onstorage',
+      'onunhandledrejection', 'onunload', 'alert', 'atob', 'blur', 'btoa', 'cancelAnimationFrame',
+      'cancelIdleCallback', 'captureEvents', 'clearInterval', 'clearTimeout', 'close', 'confirm',
+      'createImageBitmap', 'fetch', 'find', 'focus', 'getComputedStyle', 'getSelection', 'matchMedia',
+      'moveBy', 'moveTo', 'open', 'postMessage', 'print', 'prompt', 'queueMicrotask', 'releaseEvents',
+      'reportError', 'requestAnimationFrame', 'requestIdleCallback', 'resizeBy', 'resizeTo', 'scroll',
+      'scrollBy', 'scrollTo', 'setInterval', 'setTimeout', 'stop', 'structuredClone', 'webkitCancelAnimationFrame',
+      'webkitRequestAnimationFrame', 'chrome', 'caches', 'cookieStore', 'ondevicemotion', 'ondeviceorientation',
+      'ondeviceorientationabsolute', 'launchQueue', 'AbortController', 'AbortSignal', 'AbstractRange',
+      'Atomics', 'Blob', 'BlobEvent', 'ByteLengthQueuingStrategy', 'CSS', 'CSSAnimation', 'PerformanceEntry',
+      'PerformanceObserver', 'self', 'window', 'frames', 'parent', 'top', 'length', 'opener', 'name', 'closed',
+      'origin', 'crossOriginIsolated', 'locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar',
+      'toolbar', 'status', 'frameElement', 'external', 'trustedTypes', 'speechSynthesis', 'oncontentvisibilityautostatechange',
+      'onscrollend', 'onpointerrawupdate', 'oncontextlost', 'oncontextrestored', 'SharedArrayBuffer', 'Iterator'
+    ]);
+
+    // 커스텀 속성 찾기
+    let customProps = [];
+    for (let key in window) {
+      if (!defaultWindowProps.has(key)) {
+        try {
+          const value = window[key];
+          const type = typeof value;
+          customProps.push({ key, type, value });
+        } catch(e) {
+          customProps.push({ key, type: 'error', value: e.message });
+        }
+      }
+    }
+
+    let customPropsText = customProps.length === 0 
+      ? '(커스텀 속성 없음)' 
+      : customProps.map(p => {
+          let display = `${p.key}: ${p.type}`;
+          if (p.type === 'function') {
+            display += ' [function]';
+          } else if (p.type === 'object' && p.value) {
+            try {
+              const keys = Object.keys(p.value).slice(0, 5);
+              if (keys.length > 0) display += ` { ${keys.join(', ')}${Object.keys(p.value).length > 5 ? '...' : ''} }`;
+            } catch(e) {}
+          } else if (p.type === 'string' || p.type === 'number' || p.type === 'boolean') {
+            display += ` = ${JSON.stringify(p.value).slice(0, 100)}`;
+          }
+          return display;
+        }).join('\n');
+
+    document.getElementById('customProps').textContent = customPropsText;
+
+    // 브릿지 체크
+    let bridgeResult = '';
+    const bridges = {
+      'webkit.messageHandlers': () => window.webkit?.messageHandlers,
+      'AndroidBridge': () => window.AndroidBridge,
+      'ReactNativeWebView': () => window.ReactNativeWebView,
+      'postMessage native': () => window.postMessage.toString().includes('native'),
+    };
+
+    for (const [name, check] of Object.entries(bridges)) {
+      try {
+        const result = check();
+        const exists = result !== undefined && result !== false;
+        bridgeResult += `${exists ? '✅' : '❌'} ${name}`;
+        if (exists && typeof result === 'object') {
+          try {
+            bridgeResult += `: ${Object.keys(result).join(', ')}`;
+          } catch(e) {}
+        }
+        bridgeResult += '\n';
+      } catch(e) {
+        bridgeResult += `❌ ${name}: error\n`;
+      }
+    }
+    document.getElementById('bridges').textContent = bridgeResult;
+
+    // 커스텀 코드 실행
+    function runCustomCode() {
+      const code = document.getElementById('customCode').value;
+      try {
+        const result = eval(code);
+        document.getElementById('customResult').textContent = 
+          typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+      } catch(e) {
+        document.getElementById('customResult').textContent = 'Error: ' + e.message;
+      }
+    }
+
+    // 결과 복사
+    function copyResults() {
+      const results = {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        screen: `${screen.width}x${screen.height}`,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        customWindowProps: customProps.map(p => p.key),
+        slackObjects: slackResult,
+        bridges: bridgeResult
+      };
+      
+      const text = JSON.stringify(results, null, 2);
+      
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          alert('복사됨!');
+        }).catch(() => {
+          prompt('복사하세요:', text);
+        });
+      } else {
+        prompt('복사하세요:', text);
+      }
+    }
+  </script>
+</body>
+</html>
