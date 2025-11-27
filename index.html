@@ -82,12 +82,39 @@
     <pre id="bridges"></pre>
   </div>
 
+  <h2>Window 객체 전체 탐색</h2>
+  <div class="section">
+    <div style="margin-bottom:8px;">
+      <button onclick="exploreAllWindow()">전체 스캔</button>
+      <button onclick="exploreObject(window, 'window')">window 탐색</button>
+      <button onclick="exploreObject(window.navigator, 'navigator')">navigator 탐색</button>
+      <button onclick="exploreObject(window.screen, 'screen')">screen 탐색</button>
+      <button onclick="exploreObject(window.location, 'location')">location 탐색</button>
+      <button onclick="clearExplorer()">초기화</button>
+    </div>
+    <div style="margin-bottom:8px;">
+      <input type="text" id="searchKey" placeholder="속성명 검색 (예: slack, bridge)" 
+        style="width:60%; padding:8px; background:#1a1d21; color:#fff; border:1px solid #444; border-radius:4px;">
+      <button onclick="searchWindow()">검색</button>
+    </div>
+    <div id="explorer" style="max-height:500px; overflow-y:auto;"></div>
+  </div>
+
+  <h2>객체 상세 보기</h2>
+  <div class="section">
+    <input type="text" id="objectPath" placeholder="경로 입력 (예: window.navigator.userAgent)" 
+      style="width:70%; padding:8px; background:#1a1d21; color:#fff; border:1px solid #444; border-radius:4px;">
+    <button onclick="inspectPath()">조회</button>
+    <pre id="inspectResult" style="margin-top:8px; max-height:400px; overflow-y:auto;"></pre>
+  </div>
+
   <h2>커스텀 코드 실행</h2>
   <div class="section">
     <textarea id="customCode" rows="4" style="width:100%; background:#1a1d21; color:#fff; border:1px solid #444; border-radius:4px; padding:8px; font-family:monospace; font-size:12px;">JSON.stringify(window.navigator, null, 2)</textarea>
     <br>
     <button onclick="runCustomCode()">실행</button>
     <button onclick="copyResults()">결과 복사</button>
+    <button onclick="copyAllResults()">전체 결과 복사</button>
     <pre id="customResult" style="margin-top:8px; color:#2eb67d;"></pre>
   </div>
 
@@ -253,6 +280,302 @@
       }
     }
     document.getElementById('bridges').textContent = bridgeResult;
+
+    // Window 전체 탐색
+    let allWindowData = {};
+
+    function safeStringify(obj, depth = 0, maxDepth = 2, seen = new WeakSet()) {
+      if (depth > maxDepth) return '[max depth]';
+      if (obj === null) return 'null';
+      if (obj === undefined) return 'undefined';
+      
+      const type = typeof obj;
+      
+      if (type === 'function') {
+        return `[function ${obj.name || 'anonymous'}]`;
+      }
+      if (type !== 'object') {
+        return JSON.stringify(obj);
+      }
+      if (obj instanceof Element) {
+        return `[Element: ${obj.tagName}]`;
+      }
+      if (obj instanceof Window) {
+        return '[Window]';
+      }
+      if (seen.has(obj)) {
+        return '[Circular]';
+      }
+      
+      try {
+        seen.add(obj);
+        
+        if (Array.isArray(obj)) {
+          if (obj.length > 10) {
+            return `[Array(${obj.length})]`;
+          }
+          return '[' + obj.slice(0, 10).map(v => safeStringify(v, depth + 1, maxDepth, seen)).join(', ') + ']';
+        }
+        
+        const keys = Object.keys(obj);
+        if (keys.length === 0) return '{}';
+        if (keys.length > 20) {
+          return `{${keys.slice(0, 20).join(', ')}... (${keys.length} keys)}`;
+        }
+        
+        const entries = keys.slice(0, 20).map(k => {
+          try {
+            return `${k}: ${safeStringify(obj[k], depth + 1, maxDepth, seen)}`;
+          } catch(e) {
+            return `${k}: [error]`;
+          }
+        });
+        return '{ ' + entries.join(', ') + ' }';
+      } catch(e) {
+        return '[error: ' + e.message + ']';
+      }
+    }
+
+    function exploreAllWindow() {
+      const explorer = document.getElementById('explorer');
+      explorer.innerHTML = '<div style="color:#ecb22e;">스캔 중...</div>';
+      
+      setTimeout(() => {
+        let result = [];
+        allWindowData = {};
+        
+        for (let key in window) {
+          try {
+            const value = window[key];
+            const type = typeof value;
+            let preview = '';
+            
+            try {
+              preview = safeStringify(value, 0, 1);
+              if (preview.length > 200) preview = preview.slice(0, 200) + '...';
+            } catch(e) {
+              preview = '[cannot stringify]';
+            }
+            
+            allWindowData[key] = { type, preview };
+            result.push({ key, type, preview });
+          } catch(e) {
+            allWindowData[key] = { type: 'error', preview: e.message };
+            result.push({ key, type: 'error', preview: e.message });
+          }
+        }
+        
+        result.sort((a, b) => a.key.localeCompare(b.key));
+        
+        let html = `<div class="label" style="margin-bottom:8px;">총 ${result.length}개 속성</div>`;
+        html += '<div style="font-family:monospace; font-size:12px;">';
+        
+        result.forEach(item => {
+          const color = item.type === 'function' ? '#36c5f0' : 
+                       item.type === 'object' ? '#2eb67d' : 
+                       item.type === 'error' ? '#e01e5a' : '#e8e8e8';
+          html += `<div style="padding:2px 0; border-bottom:1px solid #333;" onclick="exploreObject(window['${item.key}'], 'window.${item.key}')" style="cursor:pointer;">`;
+          html += `<span style="color:${color}; cursor:pointer;">${item.key}</span>`;
+          html += ` <span style="color:#666;">(${item.type})</span>`;
+          html += `<div style="color:#888; font-size:11px; margin-left:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(item.preview)}</div>`;
+          html += '</div>';
+        });
+        
+        html += '</div>';
+        explorer.innerHTML = html;
+      }, 100);
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function exploreObject(obj, path) {
+      const explorer = document.getElementById('explorer');
+      
+      if (obj === null || obj === undefined) {
+        explorer.innerHTML = `<div>${path} = ${obj}</div>`;
+        return;
+      }
+      
+      let result = [];
+      
+      try {
+        const keys = Object.getOwnPropertyNames(obj);
+        keys.forEach(key => {
+          try {
+            const value = obj[key];
+            const type = typeof value;
+            let preview = safeStringify(value, 0, 1);
+            if (preview.length > 150) preview = preview.slice(0, 150) + '...';
+            result.push({ key, type, preview });
+          } catch(e) {
+            result.push({ key, type: 'error', preview: e.message });
+          }
+        });
+      } catch(e) {
+        explorer.innerHTML = `<div style="color:#e01e5a;">탐색 실패: ${e.message}</div>`;
+        return;
+      }
+      
+      result.sort((a, b) => a.key.localeCompare(b.key));
+      
+      let html = `<div class="label" style="margin-bottom:8px;">${path} (${result.length}개 속성)</div>`;
+      html += '<div style="font-family:monospace; font-size:12px;">';
+      
+      result.forEach(item => {
+        const color = item.type === 'function' ? '#36c5f0' : 
+                     item.type === 'object' ? '#2eb67d' : 
+                     item.type === 'error' ? '#e01e5a' : '#e8e8e8';
+        html += `<div style="padding:2px 0; border-bottom:1px solid #333;">`;
+        html += `<span style="color:${color};">${item.key}</span>`;
+        html += ` <span style="color:#666;">(${item.type})</span>`;
+        html += `<div style="color:#888; font-size:11px; margin-left:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(item.preview)}</div>`;
+        html += '</div>';
+      });
+      
+      html += '</div>';
+      explorer.innerHTML = html;
+    }
+
+    function searchWindow() {
+      const query = document.getElementById('searchKey').value.toLowerCase();
+      if (!query) {
+        alert('검색어를 입력하세요');
+        return;
+      }
+      
+      const explorer = document.getElementById('explorer');
+      let results = [];
+      
+      function searchObj(obj, path, depth = 0) {
+        if (depth > 3) return;
+        if (!obj || typeof obj !== 'object') return;
+        
+        try {
+          const keys = Object.keys(obj);
+          keys.forEach(key => {
+            const fullPath = path ? `${path}.${key}` : key;
+            if (key.toLowerCase().includes(query)) {
+              try {
+                const value = obj[key];
+                const type = typeof value;
+                let preview = safeStringify(value, 0, 1);
+                if (preview.length > 100) preview = preview.slice(0, 100) + '...';
+                results.push({ path: fullPath, type, preview });
+              } catch(e) {
+                results.push({ path: fullPath, type: 'error', preview: e.message });
+              }
+            }
+            
+            if (depth < 2) {
+              try {
+                const value = obj[key];
+                if (value && typeof value === 'object' && !Array.isArray(value)) {
+                  searchObj(value, fullPath, depth + 1);
+                }
+              } catch(e) {}
+            }
+          });
+        } catch(e) {}
+      }
+      
+      searchObj(window, 'window', 0);
+      
+      let html = `<div class="label" style="margin-bottom:8px;">"${query}" 검색 결과: ${results.length}개</div>`;
+      
+      if (results.length === 0) {
+        html += '<div style="color:#888;">결과 없음</div>';
+      } else {
+        html += '<div style="font-family:monospace; font-size:12px;">';
+        results.forEach(item => {
+          const color = item.type === 'function' ? '#36c5f0' : 
+                       item.type === 'object' ? '#2eb67d' : 
+                       item.type === 'error' ? '#e01e5a' : '#e8e8e8';
+          html += `<div style="padding:4px 0; border-bottom:1px solid #333;">`;
+          html += `<span style="color:#ecb22e;">${item.path}</span>`;
+          html += ` <span style="color:#666;">(${item.type})</span>`;
+          html += `<div style="color:#888; font-size:11px; margin-left:12px;">${escapeHtml(item.preview)}</div>`;
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      
+      explorer.innerHTML = html;
+    }
+
+    function inspectPath() {
+      const path = document.getElementById('objectPath').value;
+      const resultEl = document.getElementById('inspectResult');
+      
+      try {
+        const value = eval(path);
+        let output = `Type: ${typeof value}\n\n`;
+        
+        if (typeof value === 'object' && value !== null) {
+          output += `Keys (${Object.keys(value).length}):\n`;
+          Object.getOwnPropertyNames(value).forEach(key => {
+            try {
+              const v = value[key];
+              const type = typeof v;
+              let preview = safeStringify(v, 0, 2);
+              if (preview.length > 200) preview = preview.slice(0, 200) + '...';
+              output += `  ${key} (${type}): ${preview}\n`;
+            } catch(e) {
+              output += `  ${key}: [error: ${e.message}]\n`;
+            }
+          });
+        } else {
+          output += `Value: ${safeStringify(value, 0, 3)}`;
+        }
+        
+        resultEl.textContent = output;
+      } catch(e) {
+        resultEl.textContent = 'Error: ' + e.message;
+      }
+    }
+
+    function clearExplorer() {
+      document.getElementById('explorer').innerHTML = '';
+      document.getElementById('inspectResult').textContent = '';
+    }
+
+    function copyAllResults() {
+      const allData = {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        screen: `${screen.width}x${screen.height}`,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        devicePixelRatio: window.devicePixelRatio,
+        slackCheck: slackResult,
+        bridges: bridgeResult,
+        customProps: customProps.map(p => ({ key: p.key, type: p.type })),
+        allWindowKeys: Object.keys(window).sort(),
+        explorerData: allWindowData
+      };
+      
+      const text = JSON.stringify(allData, null, 2);
+      
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          alert('전체 결과 복사됨!');
+        }).catch(() => {
+          downloadAsFile(text, 'slack-debug-results.json');
+        });
+      } else {
+        downloadAsFile(text, 'slack-debug-results.json');
+      }
+    }
+
+    function downloadAsFile(content, filename) {
+      const blob = new Blob([content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
 
     // 커스텀 코드 실행
     function runCustomCode() {
